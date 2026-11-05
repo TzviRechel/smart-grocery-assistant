@@ -36,6 +36,10 @@ export function CatalogManager({
   const [barcode, setBarcode] = useState("");
   const [packageSize, setPackageSize] = useState("");
   const [packageUnit, setPackageUnit] = useState("");
+  const [purchaseProductId, setPurchaseProductId] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [purchasePrice, setPurchasePrice] = useState("");
+  const [purchaseQuantity, setPurchaseQuantity] = useState("1");
   const [newBrand, setNewBrand] = useState("");
   const [newCategory, setNewCategory] = useState("");
   const [error, setError] = useState("");
@@ -86,6 +90,65 @@ export function CatalogManager({
       clear("");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "שמירת הנתון נכשלה.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function addManualPurchase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const price = Number(purchasePrice);
+    const quantity = Number(purchaseQuantity);
+
+    if (!purchaseProductId || !purchaseDate || !Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      setError("יש לבחור מוצר ולהזין תאריך, מחיר וכמות תקינים.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    let receiptId: string | null = null;
+
+    try {
+      const { supabase, userId } = await getUserId();
+      const { data: receipt, error: receiptError } = await supabase
+        .from("receipts")
+        .insert({
+          owner_id: userId,
+          purchase_date: purchaseDate,
+          total_amount: price * quantity,
+          processing_status: "confirmed",
+        })
+        .select("id")
+        .single();
+
+      if (receiptError) throw receiptError;
+      receiptId = receipt.id;
+
+      const { error: itemError } = await supabase.from("purchase_items").insert({
+        receipt_id: receipt.id,
+        product_id: purchaseProductId,
+        original_item_name: products.find((product) => product.id === purchaseProductId)?.name ?? "רכישה ידנית",
+        quantity,
+        unit_price: price,
+        original_total_price: price * quantity,
+        discount_amount: 0,
+        final_price: price * quantity,
+        is_promotion: false,
+        ocr_confidence: null,
+      });
+
+      if (itemError) throw itemError;
+      setPurchasePrice("");
+      setPurchaseQuantity("1");
+      setPurchaseProductId("");
+      router.refresh();
+    } catch (saveError) {
+      if (receiptId) {
+        const { supabase } = await getUserId();
+        await supabase.from("receipts").delete().eq("id", receiptId);
+      }
+      setError(saveError instanceof Error ? saveError.message : "שמירת הרכישה נכשלה.");
     } finally {
       setIsSaving(false);
     }
@@ -183,6 +246,26 @@ export function CatalogManager({
           </form>
         </div>
       </div>
+
+      <form onSubmit={addManualPurchase} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
+        <h2 className="text-xl font-bold text-slate-950">הוספת רכישה ידנית</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          הרכישה תופיע בהיסטוריה ותשפיע על חישובי המחיר, גם ללא חשבונית.
+        </p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <select required value={purchaseProductId} onChange={(event) => setPurchaseProductId(event.target.value)} className="field">
+            <option value="">בחירת מוצר *</option>
+            {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+          </select>
+          <input required type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} className="field" />
+          <input required type="number" min="0" step="0.01" value={purchasePrice} onChange={(event) => setPurchasePrice(event.target.value)} placeholder="מחיר ליחידה *" className="field" />
+          <input required type="number" min="0.001" step="0.001" value={purchaseQuantity} onChange={(event) => setPurchaseQuantity(event.target.value)} placeholder="כמות *" className="field" />
+        </div>
+        <button disabled={isSaving || products.length === 0} className="mt-5 rounded-lg bg-emerald-700 px-5 py-3 font-medium text-white disabled:opacity-60">
+          {isSaving ? "שומר..." : "שמירת רכישה"}
+        </button>
+        {products.length === 0 && <p className="mt-3 text-sm text-slate-600">יש ליצור מוצר לפני הוספת רכישה.</p>}
+      </form>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-6">
         <h2 className="text-xl font-bold text-slate-950">המוצרים שלך</h2>
