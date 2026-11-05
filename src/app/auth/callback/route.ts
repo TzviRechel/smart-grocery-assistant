@@ -12,6 +12,12 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(new URL("/", request.url));
     }
+
+    console.error("Supabase auth callback failed", {
+      code: error.code,
+      message: error.message,
+      status: error.status,
+    });
   }
 
   return NextResponse.redirect(new URL("/login?error=auth_callback", request.url));
