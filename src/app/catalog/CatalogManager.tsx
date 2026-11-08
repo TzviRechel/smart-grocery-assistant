@@ -193,12 +193,98 @@ export function CatalogManager({
     }
   }
 
+  async function addStarterCatalog() {
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const { supabase, userId } = await getUserId();
+      const categoryNames = ["מוצרי מזווה", "מוצרי חלב", "שמנים", "מוצרי ניקיון"];
+      const brandNames = ["אחווה", "תנובה", "טרה", "שמן זית הגליל", "סנו"];
+      const categoryIds = new Map(categories.map((category) => [category.name, category.id]));
+      const brandIds = new Map(brands.map((brand) => [brand.name, brand.id]));
+
+      for (const name of categoryNames) {
+        if (categoryIds.has(name)) continue;
+        const { data, error: insertError } = await supabase.from("categories").insert({ name, owner_id: userId }).select("id, name").single();
+        if (insertError) throw insertError;
+        categoryIds.set(data.name, data.id);
+      }
+
+      for (const name of brandNames) {
+        if (brandIds.has(name)) continue;
+        const { data, error: insertError } = await supabase.from("brands").insert({ name, owner_id: userId }).select("id, name").single();
+        if (insertError) throw insertError;
+        brandIds.set(data.name, data.id);
+      }
+
+      const starterProducts = [
+        { name: "טחינה אחווה 500 גרם", brand: "אחווה", category: "מוצרי מזווה", size: 500, unit: "g" },
+        { name: "חלב תנובה 3% 1 ליטר", brand: "תנובה", category: "מוצרי חלב", size: 1, unit: "l" },
+        { name: "גבינה לבנה 5% 250 גרם", brand: "תנובה", category: "מוצרי חלב", size: 250, unit: "g" },
+        { name: "קוטג׳ 5% 250 גרם", brand: "תנובה", category: "מוצרי חלב", size: 250, unit: "g" },
+        { name: "חלב טרה 3% 1 ליטר", brand: "טרה", category: "מוצרי חלב", size: 1, unit: "l" },
+        { name: "שמן זית כתית מעולה 750 מ״ל", brand: "שמן זית הגליל", category: "שמנים", size: 750, unit: "ml" },
+        { name: "שמן קנולה 1 ליטר", brand: null, category: "שמנים", size: 1, unit: "l" },
+        { name: "נוזל כלים 750 מ״ל", brand: "סנו", category: "מוצרי ניקיון", size: 750, unit: "ml" },
+      ];
+
+      for (const product of starterProducts) {
+        const { data: existing, error: findError } = await supabase.from("products").select("id").eq("owner_id", userId).eq("name", product.name).maybeSingle();
+        if (findError) throw findError;
+        if (existing) continue;
+
+        const { error: insertError } = await supabase.from("products").insert({
+          owner_id: userId,
+          name: product.name,
+          brand_id: product.brand ? brandIds.get(product.brand) : null,
+          category_id: categoryIds.get(product.category),
+          package_size: product.size,
+          package_unit: product.unit,
+        });
+        if (insertError) throw insertError;
+      }
+
+      const [productsResult, brandsResult, categoriesResult] = await Promise.all([
+        supabase.from("products").select("id, name, barcode, package_size, package_unit, brand_id, category_id").order("name"),
+        supabase.from("brands").select("id, name").order("name"),
+        supabase.from("categories").select("id, name").order("name"),
+      ]);
+      if (productsResult.error) throw productsResult.error;
+      if (brandsResult.error) throw brandsResult.error;
+      if (categoriesResult.error) throw categoriesResult.error;
+      setProducts(productsResult.data);
+      setBrands(brandsResult.data);
+      setCategories(categoriesResult.data);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "טעינת הקטלוג נכשלה.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const brandName = new Map(brands.map((brand) => [brand.id, brand.name]));
   const categoryName = new Map(categories.map((category) => [category.id, category.name]));
 
   return (
     <div className="space-y-8">
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <h2 className="text-xl font-bold text-slate-950">הוספת קטלוג התחלתי</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+          הוספת קטגוריות, מותגים ומוצרים נפוצים לחשבון שלך כדי שתוכל להתחיל
+          להתנסות. פריטים שכבר קיימים לא יוכפלו.
+        </p>
+        <button
+          type="button"
+          onClick={addStarterCatalog}
+          disabled={isSaving}
+          className="mt-4 rounded-lg bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-60"
+        >
+          {isSaving ? "מוסיף..." : "הוספת קטלוג התחלתי"}
+        </button>
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <form onSubmit={addProduct} className="rounded-2xl border border-slate-200 bg-white p-6">
